@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Live Bytebeat / Floatbeat Player</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    textarea {
+      width: 100%;
+      height: 80px;
+      font-family: monospace;
+    }
+    label, input, button {
+      display: block;
+      margin-top: 10px;
+    }
+    input[type="range"] {
+      width: 300px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Live Bytebeat / Floatbeat Player</h1>
+  <textarea id="formula" placeholder="Enter formula like: (t>>6|t>>3)&127"></textarea>
+
+  <label for="sampleRate">Sample Rate: <span id="rateDisplay">8000</span> Hz</label>
+  <input type="range" id="sampleRate" min="1000" max="44100" step="1000" value="8000">
+  <input type="number" id="sampleRateNumber" min="1000" max="44100" step="1000" value="8000">
+
+  <button onclick="toggleMode()" id="modeBtn">Switch to Floatbeat</button>
+  <button onclick="play()">Play</button>
+  <button onclick="stop()">Stop</button>
+
+  <script>
+    let audioCtx;
+    let scriptNode;
+    let t = 0;
+    let virtualT = 0;
+    let virtualSampleRate = 8000;
+    let isFloatbeat = false;
+    let bytebeatFunc = (t) => 0; // Default safe function
+
+    const formulaInput = document.getElementById("formula");
+    const rateSlider = document.getElementById("sampleRate");
+    const rateNumber = document.getElementById("sampleRateNumber");
+    const rateDisplay = document.getElementById("rateDisplay");
+    const modeBtn = document.getElementById("modeBtn");
+
+    // Sync sample rate inputs
+    rateSlider.oninput = () => {
+      rateNumber.value = rateSlider.value;
+      rateDisplay.textContent = rateSlider.value;
+      virtualSampleRate = parseInt(rateSlider.value);
+    };
+    rateNumber.oninput = () => {
+      rateSlider.value = rateNumber.value;
+      rateDisplay.textContent = rateNumber.value;
+      virtualSampleRate = parseInt(rateNumber.value);
+    };
+
+    // Live update formula as you type
+    formulaInput.addEventListener("input", () => {
+      try {
+        const newFunc = new Function("t", "return " + formulaInput.value);
+        bytebeatFunc = newFunc;
+      } catch (e) {
+        // Don't crash on typing errors — just ignore invalid input
+      }
+    });
+
+    function toggleMode() {
+      isFloatbeat = !isFloatbeat;
+      modeBtn.textContent = isFloatbeat ? "Switch to Bytebeat" : "Switch to Floatbeat";
+    }
+
+    function play() {
+      stop();
+      t = 0;
+
+      try {
+        bytebeatFunc = new Function("t", "return " + formulaInput.value);
+      } catch (e) {
+        alert("Invalid formula");
+        return;
+      }
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      virtualSampleRate = parseInt(rateSlider.value);
+      scriptNode = audioCtx.createScriptProcessor(1024, 0, 1);
+
+      scriptNode.onaudioprocess = function(e) {
+        const output = e.outputBuffer.getChannelData(0);
+        const actualRate = audioCtx.sampleRate;
+
+        for (let i = 0; i < output.length; i++) {
+          virtualT = Math.floor(t * (virtualSampleRate / actualRate));
+
+          let sample = 0;
+          try {
+            sample = bytebeatFunc(virtualT);
+          } catch (e) {
+            // If there's an error, fallback to silence
+            sample = 0;
+          }
+
+          if (isFloatbeat) {
+            output[i] = Math.max(-1, Math.min(1, sample));
+          } else {
+            output[i] = ((sample & 255) - 128) / 128;
+          }
+
+          t++;
+        }
+      };
+
+      scriptNode.connect(audioCtx.destination);
+    }
+
+    function stop() {
+      if (scriptNode) {
+        scriptNode.disconnect();
+        scriptNode = null;
+      }
+      if (audioCtx) {
+        audioCtx.close();
+        audioCtx = null;
+      }
+    }
+  </script>
+</body>
+</html>
